@@ -1,0 +1,24 @@
+Source: wingpanel-indicator-appicontray
+Section: x11
+Priority: optional
+Maintainer: Barunes Padhy <contact@barunes.io>
+Build-Depends: debhelper-compat (= 13),
+               meson (>= 0.56.0),
+               valac (>= 0.48),
+               libwingpanel-dev (>= 3.0.0),
+               libgranite-dev (>= 6.0.0),
+               libglib2.0-dev,
+               libgtk-3-dev,
+               libgee-0.8-dev,
+               libdbusmenu-gtk3-dev
+Standards-Version: 1.0
+Homepage: https://github.com/barunespadhy/wingpanel-indicator-appicontray
+
+Package: wingpanel-indicator-appicontray
+Architecture: any
+Depends: ${misc:Depends},
+         ${shlibs:Depends},
+         wingpanel,
+         libdbusmenu-gtk3-4
+Description: An elementary OS Wingpanel Indicator that adds support for 
+             StatusNotifierItem (Ayatana) tray icons.

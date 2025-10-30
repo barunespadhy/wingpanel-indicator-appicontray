@@ -1,0 +1,7 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: wingpanel-indicator-appicontray
+Source: https://github.com/barunespadhy/wingpanel-indicator-appicontray
+
+Files: *
+Copyright: 2025 Barunes Padhy <contact@barunes.io>
+License: GPL-3.0
