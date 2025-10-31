@@ -1,6 +1,8 @@
 # Wingpanel AppIconTray Indicator
 
 Enables support for for StatusNotifierItem (Ayatana) tray icons.
+<img width="541" height="185" alt="image" src="https://github.com/user-attachments/assets/849ab7d8-29da-4870-ac17-7144be687aa2" />
+
 
 # Installation
 
