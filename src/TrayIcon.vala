@@ -27,7 +27,7 @@ public class TrayIcon : Gtk.EventBox {
 
         icon_image = new Gtk.Image();
         icon_image.pixel_size = 16;
-        icon_image.margin = 2;
+        icon_image.margin = 6;
         add(icon_image);
 
         set_visible_window(false);

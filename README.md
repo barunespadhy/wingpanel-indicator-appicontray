@@ -15,6 +15,10 @@ Installation involves downloading dependencies and then installing the Debian pa
 Download the latest .deb file from [releases](https://github.com/barunespadhy/wingpanel-indicator-appicontray/releases/tag/Latest) section and install
 <pre>sudo dpkg -i ./wingpanel-indicator-appicontray_*_amd64.deb</pre>
 
+### Disable network manager applet (optional but recommended)
+Network Manager creates its own applet, which results in two network managers being shown. Elementary's own network manager, and gnome's default network manager. To avoid this, run the following to disable the applet from starting:
+<pre>sudo mv /etc/xdg/autostart/nm-applet.desktop /etc/xdg/autostart/nm-applet.desktop.bak</pre>
+
 # Building from source
 
 Building from source involves installing necessary build dependencies and running relevant build commands.
@@ -53,3 +57,6 @@ If installed via Debian package:
 If built from source, then in the cloned directory run:
 <pre>sudo ninja -C build uninstall</pre>
 
+### Enable network manager applet (optional but reccommended)
+If the network manager applet was diabled, run the following to get it back:
+<pre>sudo mv /etc/xdg/autostart/nm-applet.desktop.bak /etc/xdg/autostart/nm-applet.desktop</pre>
