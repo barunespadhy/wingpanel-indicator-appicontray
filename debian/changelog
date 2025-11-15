@@ -1,5 +1,6 @@
-wingpanel-indicator-appicontray (1.1.0) stable; urgency=medium
+wingpanel-indicator-appicontray (1.2.0) stable; urgency=medium
 
   * Initial release
   * Increased icon spacing
+  * Fixed icon proxy issue on icon change
 
