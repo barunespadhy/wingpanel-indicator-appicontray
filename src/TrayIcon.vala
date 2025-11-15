@@ -47,11 +47,8 @@ public class TrayIcon : Gtk.EventBox {
             removed(); return;
         }
 
-        bool success = yield try_kde_interface();
-        if (!success) success = yield try_freedesktop_interface();
+        bool success = yield recreate_proxy();
         if (!success) { removed(); return; }
-
-        yield introspect_properties();
 
         update_icon();
         update_tooltip();
@@ -78,9 +75,25 @@ public class TrayIcon : Gtk.EventBox {
         ready();
     }
 
+    // Recreate proxies when needed
+    private async bool recreate_proxy() {
+        if (connection == null) return false;
+
+        // Drop old proxies and interface choice
+        item_proxy = null;
+        freedesktop_proxy = null;
+        use_freedesktop_interface = false;
+
+        bool success = yield try_kde_interface();
+        if (!success) success = yield try_freedesktop_interface();
+        if (!success) return false;
+
+        yield introspect_properties();
+        return true;
+    }
+
     private async void introspect_properties() {
         if (connection == null) return;
-        // Only print errors if introspection fails
         try {
             var result = yield connection.call(
                 bus_name,
@@ -111,10 +124,23 @@ public class TrayIcon : Gtk.EventBox {
             if (item_proxy == null) return false;
             try { var test_id = item_proxy.Id; }
             catch (Error e) { item_proxy = null; return false; }
-            item_proxy.NewIcon.connect(() => update_icon());
+
+            // On icon change, recreate proxies then update the icon
+            item_proxy.NewIcon.connect(() => {
+                recreate_proxy.begin((obj, res) => {
+                    try { recreate_proxy.end(res); } catch (Error e) {}
+                    update_icon();
+                });
+            });
             item_proxy.NewStatus.connect((status) => handle_status_change(status));
-            item_proxy.NewAttentionIcon.connect(() => update_icon());
+            item_proxy.NewAttentionIcon.connect(() => {
+                recreate_proxy.begin((obj, res) => {
+                    try { recreate_proxy.end(res); } catch (Error e) {}
+                    update_icon();
+                });
+            });
             item_proxy.NewTitle.connect(() => update_tooltip());
+
             use_freedesktop_interface = false;
             return true;
         } catch (Error e) {
@@ -135,10 +161,22 @@ public class TrayIcon : Gtk.EventBox {
             if (freedesktop_proxy == null) return false;
             try { var test_id = freedesktop_proxy.Id; }
             catch (Error e) { freedesktop_proxy = null; return false; }
-            freedesktop_proxy.NewIcon.connect(() => update_icon());
+
+            freedesktop_proxy.NewIcon.connect(() => {
+                recreate_proxy.begin((obj, res) => {
+                    try { recreate_proxy.end(res); } catch (Error e) {}
+                    update_icon();
+                });
+            });
             freedesktop_proxy.NewStatus.connect((status) => handle_status_change(status));
-            freedesktop_proxy.NewAttentionIcon.connect(() => update_icon());
+            freedesktop_proxy.NewAttentionIcon.connect(() => {
+                recreate_proxy.begin((obj, res) => {
+                    try { recreate_proxy.end(res); } catch (Error e) {}
+                    update_icon();
+                });
+            });
             freedesktop_proxy.NewTitle.connect(() => update_tooltip());
+
             use_freedesktop_interface = true;
             return true;
         } catch (Error e) {
@@ -405,4 +443,3 @@ public class TrayIcon : Gtk.EventBox {
         base.dispose();
     }
 }
-
