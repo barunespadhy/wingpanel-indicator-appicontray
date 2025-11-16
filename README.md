@@ -12,7 +12,7 @@ Installation involves downloading dependencies and then installing the Debian pa
 <pre>sudo apt-get install wingpanel</pre>
 
 ### Install the Package
-Download the latest .deb file from [releases](https://github.com/barunespadhy/wingpanel-indicator-appicontray/releases/tag/Latest) section and install
+Download the latest .deb file from [releases]([https://github.com/barunespadhy/wingpanel-indicator-appicontray/releases/tag/Latest](https://github.com/barunespadhy/wingpanel-indicator-appicontray/releases/tag/v1.2)) section and install
 <pre>sudo dpkg -i ./wingpanel-indicator-appicontray_*_amd64.deb</pre>
 
 ### Disable network manager applet (optional but recommended)
