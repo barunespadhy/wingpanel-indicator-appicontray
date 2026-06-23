@@ -20,26 +20,21 @@ public class StatusNotifierHost : Object {
     }
     
     public async void start() {
-        try {
-            // Own our host service name
-            host_name_id = Bus.own_name(
-                BusType.SESSION,
-                host_service_name,
-                BusNameOwnerFlags.NONE,
-                null,
-                null,
-                null
-            );
+        // Own our host service name
+        host_name_id = Bus.own_name(
+            BusType.SESSION,
+            host_service_name,
+            BusNameOwnerFlags.NONE,
+            null,
+            null,
+            null
+        );
 
-            // Give the bus a moment to register our name
-            Timeout.add(100, () => {
-                connect_to_watcher.begin();
-                return false;
-            });
-
-        } catch (Error e) {
-            critical("Failed to start StatusNotifierHost: %s", e.message);
-        }
+        // Give the bus a moment to register our name
+        Timeout.add(100, () => {
+            connect_to_watcher.begin();
+            return false;
+        });
     }
     
     private async void connect_to_watcher() {

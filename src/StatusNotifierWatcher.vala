@@ -25,7 +25,7 @@ public class StatusNotifierWatcher : Object {
         registered_hosts = new Gee.ArrayList<string>();
     }
     
-    public async bool register_on_bus() {
+    public async bool register_on_bus() throws DBusError, IOError {
         try {
             connection = yield Bus.get(BusType.SESSION);
             try {
@@ -94,9 +94,13 @@ public class StatusNotifierWatcher : Object {
             bus_name = service;
             debug("Registering standard SNI item: %s", service_to_emit);
         }
-        registered_items.add(service_to_emit);
-        item_registered(service_to_emit);
-        StatusNotifierItemRegistered(service_to_emit);
+
+        if (!service_to_emit.contains("nm_applet")) {
+            registered_items.add(service_to_emit);
+            item_registered(service_to_emit);
+            StatusNotifierItemRegistered(service_to_emit);
+            debug("StatusNotifierItem registered: %s", service_to_emit);
+        }
 
         // Monitor when service disconnects
         Bus.watch_name(

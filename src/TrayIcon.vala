@@ -19,6 +19,7 @@ public class TrayIcon : Gtk.EventBox {
 
     public signal void ready();
     public signal void removed();
+    public signal void clicked();
 
     public TrayIcon(string service_name, string bus_name, string object_path) {
         this.service_name = service_name;
@@ -26,8 +27,8 @@ public class TrayIcon : Gtk.EventBox {
         this.object_path = object_path;
 
         icon_image = new Gtk.Image();
-        icon_image.pixel_size = 16;
-        icon_image.margin = 6;
+        icon_image.pixel_size = 20;
+        icon_image.margin = 12;
         add(icon_image);
 
         set_visible_window(false);
@@ -53,22 +54,14 @@ public class TrayIcon : Gtk.EventBox {
         update_icon();
         update_tooltip();
 
-        try {
-            string status = get_status();
-            debug("TrayIcon '%s' initial status: '%s'", service_name, status ?? "(null)");
-            if (status != null && status != "") handle_status_change(status);
-        } catch (Error e) {
-            debug("TrayIcon '%s' could not get status: %s", service_name, e.message);
-        }
+        string status = get_status();
+        debug("TrayIcon '%s' initial status: '%s'", service_name, status ?? "(null)");
+        if (status != null && status != "") handle_status_change(status);
 
-        try {
-            var menu_path = get_menu_path();
-            if (menu_path != null && menu_path != "/" && menu_path != "") {
-                debug("TrayIcon '%s': Initializing DBusMenu at %s", service_name, (string)menu_path);
-                dbusmenu = new DbusmenuGtk.Menu(bus_name, menu_path);
-            }
-        } catch (Error e) {
-            debug("TrayIcon '%s': Menu init error: %s", service_name, e.message);
+        var menu_path = get_menu_path();
+        if (menu_path != null && menu_path != "/" && menu_path != "") {
+            debug("TrayIcon '%s': Initializing DBusMenu at %s", service_name, (string)menu_path);
+            dbusmenu = new DbusmenuGtk.Menu(bus_name, menu_path);
         }
 
         is_ready = true;
@@ -88,29 +81,7 @@ public class TrayIcon : Gtk.EventBox {
         if (!success) success = yield try_freedesktop_interface();
         if (!success) return false;
 
-        yield introspect_properties();
         return true;
-    }
-
-    private async void introspect_properties() {
-        if (connection == null) return;
-        try {
-            var result = yield connection.call(
-                bus_name,
-                object_path,
-                "org.freedesktop.DBus.Properties",
-                "GetAll",
-                new Variant("(s)", use_freedesktop_interface ?
-                    "org.freedesktop.StatusNotifierItem" :
-                    "org.kde.StatusNotifierItem"),
-                new VariantType("(a{sv})"),
-                DBusCallFlags.NONE,
-                -1,
-                null
-            );
-        } catch (Error e) {
-            debug("TrayIcon '%s': Error introspecting properties: %s", service_name, e.message);
-        }
     }
 
     private async bool try_kde_interface() {
@@ -122,20 +93,18 @@ public class TrayIcon : Gtk.EventBox {
                 DBusProxyFlags.NONE
             );
             if (item_proxy == null) return false;
-            try { var test_id = item_proxy.Id; }
-            catch (Error e) { item_proxy = null; return false; }
 
             // On icon change, recreate proxies then update the icon
             item_proxy.NewIcon.connect(() => {
                 recreate_proxy.begin((obj, res) => {
-                    try { recreate_proxy.end(res); } catch (Error e) {}
+                    recreate_proxy.end(res);
                     update_icon();
                 });
             });
             item_proxy.NewStatus.connect((status) => handle_status_change(status));
             item_proxy.NewAttentionIcon.connect(() => {
                 recreate_proxy.begin((obj, res) => {
-                    try { recreate_proxy.end(res); } catch (Error e) {}
+                    recreate_proxy.end(res);
                     update_icon();
                 });
             });
@@ -159,19 +128,17 @@ public class TrayIcon : Gtk.EventBox {
                 DBusProxyFlags.NONE
             );
             if (freedesktop_proxy == null) return false;
-            try { var test_id = freedesktop_proxy.Id; }
-            catch (Error e) { freedesktop_proxy = null; return false; }
 
             freedesktop_proxy.NewIcon.connect(() => {
                 recreate_proxy.begin((obj, res) => {
-                    try { recreate_proxy.end(res); } catch (Error e) {}
+                    recreate_proxy.end(res);
                     update_icon();
                 });
             });
             freedesktop_proxy.NewStatus.connect((status) => handle_status_change(status));
             freedesktop_proxy.NewAttentionIcon.connect(() => {
                 recreate_proxy.begin((obj, res) => {
-                    try { recreate_proxy.end(res); } catch (Error e) {}
+                    recreate_proxy.end(res);
                     update_icon();
                 });
             });
@@ -187,83 +154,67 @@ public class TrayIcon : Gtk.EventBox {
     }
 
     private string? get_icon_name() {
-        try {
-            if (use_freedesktop_interface && freedesktop_proxy != null)
-                return freedesktop_proxy.IconName;
-            else if (item_proxy != null)
-                return item_proxy.IconName;
-            return null;
-        } catch (Error e) { return null; }
+        if (use_freedesktop_interface && freedesktop_proxy != null)
+            return freedesktop_proxy.IconName;
+        else if (item_proxy != null)
+            return item_proxy.IconName;
+        return null;
     }
 
     private string? get_icon_theme_path() {
-        try {
-            if (use_freedesktop_interface && freedesktop_proxy != null)
-                return freedesktop_proxy.IconThemePath;
-            else if (item_proxy != null)
-                return item_proxy.IconThemePath;
-            return null;
-        } catch (Error e) { return null; }
+        if (use_freedesktop_interface && freedesktop_proxy != null)
+            return freedesktop_proxy.IconThemePath;
+        else if (item_proxy != null)
+            return item_proxy.IconThemePath;
+        return null;
     }
 
     private IconPixmapStruct[]? get_icon_pixmap() {
-        try {
-            if (use_freedesktop_interface && freedesktop_proxy != null)
-                return freedesktop_proxy.IconPixmap;
-            else if (item_proxy != null)
-                return item_proxy.IconPixmap;
-            return null;
-        } catch (Error e) { return null; }
+        if (use_freedesktop_interface && freedesktop_proxy != null)
+            return freedesktop_proxy.IconPixmap;
+        else if (item_proxy != null)
+            return item_proxy.IconPixmap;
+        return null;
     }
 
     private string? get_attention_icon_name() {
-        try {
-            if (use_freedesktop_interface && freedesktop_proxy != null)
-                return freedesktop_proxy.AttentionIconName;
-            else if (item_proxy != null)
-                return item_proxy.AttentionIconName;
-            return null;
-        } catch (Error e) { return null; }
+        if (use_freedesktop_interface && freedesktop_proxy != null)
+            return freedesktop_proxy.AttentionIconName;
+        else if (item_proxy != null)
+            return item_proxy.AttentionIconName;
+        return null;
     }
 
     private IconPixmapStruct[]? get_attention_icon_pixmap() {
-        try {
-            if (use_freedesktop_interface && freedesktop_proxy != null)
-                return freedesktop_proxy.AttentionIconPixmap;
-            else if (item_proxy != null)
-                return item_proxy.AttentionIconPixmap;
-            return null;
-        } catch (Error e) { return null; }
+        if (use_freedesktop_interface && freedesktop_proxy != null)
+            return freedesktop_proxy.AttentionIconPixmap;
+        else if (item_proxy != null)
+            return item_proxy.AttentionIconPixmap;
+        return null;
     }
 
     private string? get_title() {
-        try {
-            if (use_freedesktop_interface && freedesktop_proxy != null)
-                return freedesktop_proxy.Title;
-            else if (item_proxy != null)
-                return item_proxy.Title;
-            return null;
-        } catch (Error e) { return null; }
+        if (use_freedesktop_interface && freedesktop_proxy != null)
+            return freedesktop_proxy.Title;
+        else if (item_proxy != null)
+            return item_proxy.Title;
+        return null;
     }
 
     private string? get_status() {
-        try {
-            if (use_freedesktop_interface && freedesktop_proxy != null)
-                return freedesktop_proxy.Status;
-            else if (item_proxy != null)
-                return item_proxy.Status;
-            return null;
-        } catch (Error e) { return null; }
+        if (use_freedesktop_interface && freedesktop_proxy != null)
+            return freedesktop_proxy.Status;
+        else if (item_proxy != null)
+            return item_proxy.Status;
+        return null;
     }
 
     private ObjectPath? get_menu_path() {
-        try {
-            if (use_freedesktop_interface && freedesktop_proxy != null)
-                return freedesktop_proxy.Menu;
-            else if (item_proxy != null)
-                return item_proxy.Menu;
-            return null;
-        } catch (Error e) { return null; }
+        if (use_freedesktop_interface && freedesktop_proxy != null)
+            return freedesktop_proxy.Menu;
+        else if (item_proxy != null)
+            return item_proxy.Menu;
+        return null;
     }
 
     private void update_icon() {
@@ -295,13 +246,13 @@ public class TrayIcon : Gtk.EventBox {
                     var pixbuf = new Gdk.Pixbuf.from_file_at_scale(icon_name, 16, 16, true);
                     icon_image.set_from_pixbuf(pixbuf);
                     return;
-                } catch (Error e) {}
+                } catch (Error e) { debug("Error loading icon from file: %s", e.message); }
             }
         }
         IconPixmapStruct[]? pixmaps = needs_attention ? get_attention_icon_pixmap() : get_icon_pixmap();
         if (pixmaps != null && pixmaps.length > 0 && load_icon_from_pixmap(pixmaps)) return;
         icon_image.set_from_icon_name("application-x-executable", Gtk.IconSize.SMALL_TOOLBAR);
-        icon_image.pixel_size = 16;
+        icon_image.pixel_size = 20;
     }
 
     private bool load_icon_from_path(string base_path, string icon_name) {
@@ -315,7 +266,7 @@ public class TrayIcon : Gtk.EventBox {
                         var pixbuf = new Gdk.Pixbuf.from_file_at_scale(icon_file, 16, 16, true);
                         icon_image.set_from_pixbuf(pixbuf);
                         return true;
-                    } catch (Error e) {}
+                    } catch (Error e) { debug("Error loading icon from file: %s", e.message); }
                 }
             }
         }
@@ -326,42 +277,40 @@ public class TrayIcon : Gtk.EventBox {
         int best_idx = 0;
         int best_diff = int.MAX;
         for (int i = 0; i < pixmaps.length; i++) {
-            int size_diff = (pixmaps[i].width - 16).abs() + (pixmaps[i].height - 16).abs();
+            int size_diff = (pixmaps[i].width - 20).abs() + (pixmaps[i].height - 20).abs();
             if (size_diff < best_diff) {
                 best_diff = size_diff;
                 best_idx = i;
             }
         }
         var pixmap = pixmaps[best_idx];
-        try {
-            int width = pixmap.width;
-            int height = pixmap.height;
-            uint8[] data = pixmap.data;
-            int expected_size = width * height * 4;
-            if (data.length < expected_size) return false;
-            uint8[] rgba_data = new uint8[expected_size];
-            for (int i = 0; i < width * height; i++) {
-                int src_idx = i * 4;
-                int dst_idx = i * 4;
-                uint8 a = data[src_idx + 0];
-                uint8 r = data[src_idx + 1];
-                uint8 g = data[src_idx + 2];
-                uint8 b = data[src_idx + 3];
-                rgba_data[dst_idx + 0] = r;
-                rgba_data[dst_idx + 1] = g;
-                rgba_data[dst_idx + 2] = b;
-                rgba_data[dst_idx + 3] = a;
-            }
-            var pixbuf = new Gdk.Pixbuf.from_data(
-                rgba_data,
-                Gdk.Colorspace.RGB,
-                true, 8, width, height, width * 4
-            );
-            if (width != 16 || height != 16)
-                pixbuf = pixbuf.scale_simple(16, 16, Gdk.InterpType.BILINEAR);
-            icon_image.set_from_pixbuf(pixbuf);
-            return true;
-        } catch (Error e) { return false; }
+        int width = pixmap.width;
+        int height = pixmap.height;
+        uint8[] data = pixmap.data;
+        int expected_size = width * height * 4;
+        if (data.length < expected_size) return false;
+        uint8[] rgba_data = new uint8[expected_size];
+        for (int i = 0; i < width * height; i++) {
+            int src_idx = i * 4;
+            int dst_idx = i * 4;
+            uint8 a = data[src_idx + 0];
+            uint8 r = data[src_idx + 1];
+            uint8 g = data[src_idx + 2];
+            uint8 b = data[src_idx + 3];
+            rgba_data[dst_idx + 0] = r;
+            rgba_data[dst_idx + 1] = g;
+            rgba_data[dst_idx + 2] = b;
+            rgba_data[dst_idx + 3] = a;
+        }
+        var pixbuf = new Gdk.Pixbuf.from_data(
+            rgba_data,
+            Gdk.Colorspace.RGB,
+            true, 8, width, height, width * 4
+        );
+        if (width != 20 || height != 20)
+            pixbuf = pixbuf.scale_simple(20, 20, Gdk.InterpType.BILINEAR);
+        icon_image.set_from_pixbuf(pixbuf);
+        return true;
     }
 
     private void update_tooltip() {
@@ -384,29 +333,56 @@ public class TrayIcon : Gtk.EventBox {
         if (item_proxy == null && freedesktop_proxy == null) return false;
         int x = (int)event.x_root;
         int y = (int)event.y_root;
-        try {
-            if (event.button == Gdk.BUTTON_PRIMARY) {
-                if (use_freedesktop_interface && freedesktop_proxy != null)
-                    freedesktop_proxy.Activate.begin(x, y);
-                else if (item_proxy != null)
-                    item_proxy.Activate.begin(x, y);
-            } else if (event.button == Gdk.BUTTON_SECONDARY) {
-                if (dbusmenu != null)
-                    dbusmenu.popup_at_pointer(event);
-                else {
-                    if (use_freedesktop_interface && freedesktop_proxy != null)
-                        freedesktop_proxy.ContextMenu.begin(x, y);
-                    else if (item_proxy != null)
-                        item_proxy.ContextMenu.begin(x, y);
-                }
-            } else if (event.button == Gdk.BUTTON_MIDDLE) {
-                if (use_freedesktop_interface && freedesktop_proxy != null)
-                    freedesktop_proxy.SecondaryActivate.begin(x, y);
-                else if (item_proxy != null)
-                    item_proxy.SecondaryActivate.begin(x, y);
+        if (event.button == Gdk.BUTTON_PRIMARY) {
+            if (use_freedesktop_interface && freedesktop_proxy != null) {
+                freedesktop_proxy.Activate.begin(x, y, (obj, res) => {
+                    try {
+                        freedesktop_proxy.Activate.end(res);
+                        this.clicked();
+                    } catch (GLib.Error e) {
+                        if (dbusmenu != null) {
+                            dbusmenu.popup_at_pointer(event);
+                        } else {
+                            freedesktop_proxy.ContextMenu.begin(x, y);
+                        }
+                    }
+                });
+            } else if (item_proxy != null) {
+                item_proxy.Activate.begin(x, y, (obj, res) => {
+                    try {
+                        item_proxy.Activate.end(res);
+                        this.clicked();
+                    } catch (GLib.Error e) {
+                        if (dbusmenu != null) {
+                            dbusmenu.popup_at_pointer(event);
+                        } else {
+                            item_proxy.ContextMenu.begin(x, y);
+                        }
+                    }
+                });
             }
-        } catch (Error e) {}
-        return true;
+        } else if (event.button == Gdk.BUTTON_SECONDARY) {
+            if (dbusmenu != null) {
+                dbusmenu.popup_at_pointer(event);
+            } else {
+                // Manual fallback if no dbusmenu is provided
+                if (use_freedesktop_interface && freedesktop_proxy != null) {
+                    freedesktop_proxy.ContextMenu.begin(x, y);
+                } else if (item_proxy != null) {
+                    item_proxy.ContextMenu.begin(x, y);
+                }
+            }
+        } 
+
+        else if (event.button == Gdk.BUTTON_MIDDLE) {
+            if (use_freedesktop_interface && freedesktop_proxy != null) {
+                freedesktop_proxy.SecondaryActivate.begin(x, y);
+            } else if (item_proxy != null) {
+                item_proxy.SecondaryActivate.begin(x, y);
+            }
+        }
+
+        return false;
     }
 
     private bool on_scroll(Gdk.EventScroll event) {
@@ -426,12 +402,10 @@ public class TrayIcon : Gtk.EventBox {
                 break;
         }
         if (delta != 0) {
-            try {
-                if (use_freedesktop_interface && freedesktop_proxy != null)
-                    freedesktop_proxy.Scroll.begin(delta, orientation);
-                else if (item_proxy != null)
-                    item_proxy.Scroll.begin(delta, orientation);
-            } catch (Error e) {}
+            if (use_freedesktop_interface && freedesktop_proxy != null)
+                freedesktop_proxy.Scroll.begin(delta, orientation);
+            else if (item_proxy != null)
+                item_proxy.Scroll.begin(delta, orientation);
         }
         return true;
     }
