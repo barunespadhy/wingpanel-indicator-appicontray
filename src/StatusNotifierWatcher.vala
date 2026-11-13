@@ -23,6 +23,8 @@ public class StatusNotifierWatcher : Object {
     public StatusNotifierWatcher() {
         registered_items = new Gee.ArrayList<string>();
         registered_hosts = new Gee.ArrayList<string>();
+
+        install_stale_sni_watch ();
     }
     
     public async bool register_on_bus() {
@@ -79,10 +81,6 @@ public class StatusNotifierWatcher : Object {
     }
     
     public async void RegisterStatusNotifierItem(string service, GLib.BusName sender) throws DBusError, IOError {
-        if (registered_items.contains(service)) {
-            debug("StatusNotifierItem already registered: %s", service);
-            return;
-        }
         string service_to_emit;
         string bus_name;
         if (service.has_prefix("/")) {
@@ -94,6 +92,14 @@ public class StatusNotifierWatcher : Object {
             bus_name = service;
             debug("Registering standard SNI item: %s", service_to_emit);
         }
+
+        // Deduplicate the canonical identifier that will actually be
+        // stored and emitted to StatusNotifierHosts.
+        if (registered_items.contains(service_to_emit)) {
+            debug("StatusNotifierItem already registered: %s", service_to_emit);
+            return;
+        }
+
         registered_items.add(service_to_emit);
         item_registered(service_to_emit);
         StatusNotifierItemRegistered(service_to_emit);
@@ -162,5 +168,209 @@ public class StatusNotifierWatcher : Object {
     public signal void StatusNotifierItemRegistered(string service);
     public signal void StatusNotifierItemUnregistered(string service);
     public signal void StatusNotifierHostRegistered();
+
+    /*
+     * APPICONTRAY_STALE_SNI_FIX
+     *
+     * Remove StatusNotifierItems whose unique D-Bus owner disappears.
+     *
+     * RegisteredStatusNotifierItems must never retain dead :1.xxx
+     * connections. Otherwise Wingpanel keeps rendering stale tray icons.
+     */
+    private DBusConnection? stale_sni_bus = null;
+    private uint stale_sni_subscription = 0;
+    private uint stale_sni_sweep = 0;
+
+    /**
+     * Owner D-Bus de un item registrado.
+     *
+     *   ":1.167"                                  -> ":1.167"
+     *   ":1.167:/org/ayatana/NotificationItem/x"   -> ":1.167"
+     *   "org.telegram.desktop"                     -> "org.telegram.desktop"
+     */
+    private string? owner_of (string item) {
+        if (item.has_prefix (":")) {
+            int slash = item.index_of_char ('/');
+            return slash > 0 ? item.substring (0, slash) : item;
+        }
+        return item;
+    }
+
+    /**
+     * ¿Ese owner D-Bus sigue vivo?
+     *
+     * GetNameOwner vale para nombres unicos (":1.98") y bien conocidos.
+     * OJO con el Variant: la entrada de GetNameOwner es la TUPLA "(s)", no
+     * "s" -> con "s" el mensaje sale mal formado, la llamada devuelve null y
+     * parece que no hay owner (era justo lo que hacia el sweep purgar icons
+     * vivos).
+     */
+    private async bool owner_alive (string name) {
+        try {
+            var owner = yield stale_sni_bus.call (
+                "org.freedesktop.DBus",
+                "/org/freedesktop/DBus",
+                "org.freedesktop.DBus",
+                "GetNameOwner",
+                new Variant ("(s)", name),
+                null,
+                DBusCallFlags.NONE,
+                1000
+            );
+            return owner != null;
+        } catch (Error e) {
+            // Solo "no hay owner" significa muerto; un timeout u otro error
+            // no puede afirmar que la app murio (no se purga por prudencia).
+            if (e.message != null &&
+                (e.message.contains ("NameHasNoOwner") ||
+                 e.message.contains ("NoSuchProcess"))) {
+                return false;
+            }
+            return true;
+        }
+    }
+
+    /**
+     * Comprueba (sin bloquear el main loop) si el owner de un item sigue vivo.
+     */
+    private async void check_item_owner (string item, string owner) {
+        bool alive = yield owner_alive (owner);
+        if (!alive) {
+            message ("AppIconTray: sweeping stale SNI %s", item);
+            unregister_item (item);
+        }
+    }
+
+    /**
+     * Barrido periodico: purga los items cuyo owner D-Bus ya no existe.
+     *
+     * Es la via determinista (no depende de recibir NameOwnerChanged, que en
+     * este entorno no llegaba) y usa unregister_item(), que emite las DOS
+     * señales: la local y la D-Bus StatusNotifierItemUnregistered, que es la
+     * que necesita StatusNotifierHost para quitar el TrayIcon del panel.
+     *
+     * Las consultas son ASÍNCRONAS a proposito: con call_sync el panel se
+     * congela (y el watchdog lo mata) porque cada consulta bloquea el bus.
+     */
+    private void sweep_stale_items () {
+        foreach (var item in registered_items) {
+            var owner = owner_of (item);
+            if (owner == null) {
+                continue;
+            }
+            check_item_owner.begin (item, owner);
+        }
+    }
+
+    private void install_stale_sni_watch () {
+        if (stale_sni_subscription != 0) {
+            return;
+        }
+
+        try {
+            stale_sni_bus = Bus.get_sync (BusType.SESSION);
+
+            stale_sni_sweep = GLib.Timeout.add_seconds (5, () => {
+                sweep_stale_items ();
+                // CONTINUE: con REMOVE el timer se borra tras la primera
+                // vuelta y el sweep solo llegaba a correr al arrancar el panel.
+                return GLib.Source.CONTINUE;
+            });
+
+            stale_sni_subscription = stale_sni_bus.signal_subscribe (
+                "org.freedesktop.DBus",
+                "org.freedesktop.DBus",
+                "NameOwnerChanged",
+                "/org/freedesktop/DBus",
+                null,
+                DBusSignalFlags.NONE,
+                (connection,
+                 sender_name,
+                 object_path,
+                 interface_name,
+                 signal_name,
+                 parameters) => {
+
+                    string name;
+                    string old_owner;
+                    string new_owner;
+
+                    parameters.get (
+                        "(sss)",
+                        out name,
+                        out old_owner,
+                        out new_owner
+                    );
+
+                    /*
+                     * We only care about a name disappearing completely.
+                     *
+                     * For unique names:
+                     *   name      = :1.167
+                     *   old_owner = :1.167
+                     *   new_owner = ""
+                     *
+                     * Well-known names (org.telegram.desktop) are also
+                     * handled: their items are registered under that exact
+                     * name, so the same match below removes them.
+                     */
+                    if (
+                        old_owner == "" ||
+                        new_owner != ""
+                    ) {
+                        return;
+                    }
+
+                    /*
+                     * Items can be registered as:
+                     *
+                     *   :1.167
+                     *   :1.167/StatusNotifierItem
+                     *   org.telegram.desktop
+                     *
+                     * Remove every representation belonging to that owner.
+                     */
+                    string[] dead_items = {};
+
+                    foreach (var item in registered_items) {
+                        if (
+                            item == name ||
+                            item.has_prefix (name + "/")
+                        ) {
+                            dead_items += item;
+                        }
+                    }
+
+                    foreach (var item in dead_items) {
+                        /*
+                         * Use the SAME path as a normal unregistration.
+                         *
+                         * unregister_item() emits BOTH signals:
+                         *   item_unregistered()             (local)
+                         *   StatusNotifierItemUnregistered() (D-Bus)
+                         *
+                         * StatusNotifierHost listens to the D-Bus one to
+                         * remove the TrayIcon from the panel. Emitting only
+                         * the local signal purged the watcher list but left
+                         * the stale icon on screen.
+                         */
+                        message (
+                            "AppIconTray: removing stale SNI %s",
+                            item
+                        );
+
+                        unregister_item (item);
+                    }
+                }
+            );
+
+        } catch (Error e) {
+            warning (
+                "AppIconTray: cannot watch D-Bus SNI owners: %s",
+                e.message
+            );
+        }
+    }
+
 }
 

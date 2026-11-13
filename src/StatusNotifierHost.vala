@@ -8,6 +8,7 @@
 public class StatusNotifierHost : Object {
     private StatusNotifierWatcherInterface? watcher;
     private Gee.HashMap<string, TrayIcon> icons;
+    private Gee.HashSet<string> pending_items;
     private string host_service_name;
     private uint host_name_id = 0;
     
@@ -16,6 +17,7 @@ public class StatusNotifierHost : Object {
     
     public StatusNotifierHost() {
         icons = new Gee.HashMap<string, TrayIcon>();
+        pending_items = new Gee.HashSet<string>();
         host_service_name = "org.kde.StatusNotifierHost-%d".printf(Posix.getpid());
     }
     
@@ -76,9 +78,9 @@ public class StatusNotifierHost : Object {
     }
     
     private void on_item_registered(string service) {
-        // Don't add duplicates
-        if (icons.has_key(service)) {
-            debug("StatusNotifierItem already exists, skipping: %s", service);
+        // Prevent duplicates both after and during asynchronous initialization.
+        if (icons.has_key(service) || pending_items.contains(service)) {
+            debug("StatusNotifierItem already exists or is initializing, skipping: %s", service);
             return;
         }
 
@@ -108,13 +110,26 @@ public class StatusNotifierHost : Object {
             debug("Parsed standard SNI: bus='%s', path='%s'", bus_name, object_path);
         }
         
+        // Reserve the service before asynchronous initialization begins.
+        pending_items.add(service);
+
         var icon = new TrayIcon(service, bus_name, object_path);
         icon.ready.connect(() => {
+            if (!pending_items.remove(service)) {
+                debug("Ignoring ready event for stale StatusNotifierItem: %s", service);
+                return;
+            }
+
             icons.set(service, icon);
             icon_added(icon);
         });
         
         icon.removed.connect(() => {
+            if (pending_items.remove(service)) {
+                debug("Removed pending StatusNotifierItem: %s", service);
+                return;
+            }
+
             on_item_unregistered(service);
         });
         
@@ -123,6 +138,12 @@ public class StatusNotifierHost : Object {
     
     private void on_item_unregistered(string service) {
         debug("StatusNotifierItem unregistered: %s", service);
+
+        if (pending_items.remove(service)) {
+            debug("Cancelled pending StatusNotifierItem: %s", service);
+            return;
+        }
+
         var icon = icons.get(service);
         if (icon != null) {
             icon_removed(icon);
@@ -137,6 +158,7 @@ public class StatusNotifierHost : Object {
         }
         
         icons.clear();
+        pending_items.clear();
     }
 }
 

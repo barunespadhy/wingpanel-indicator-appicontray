@@ -43,7 +43,7 @@ public interface StatusNotifierItemInterface : Object {
     public abstract IconPixmapStruct[] OverlayIconPixmap { owned get; }
 
     // Properties - Tooltip
-    public abstract string ToolTip { owned get; }
+    public abstract ToolTipStruct ToolTip { owned get; }
 
     // Properties - Menu
     public abstract ObjectPath Menu { owned get; }
@@ -72,6 +72,15 @@ public struct IconPixmapStruct {
     public uint8[] data;
 }
 
+// StatusNotifierItem ToolTip D-Bus signature:
+// (sa(iiay)ss)
+public struct ToolTipStruct {
+    public string icon_name;
+    public IconPixmapStruct[] icon_pixmap;
+    public string title;
+    public string description;
+}
+
 // Also support the freedesktop.org variant
 [DBus (name = "org.freedesktop.StatusNotifierItem")]
 public interface FreedesktopStatusNotifierItemInterface : Object {
@@ -91,7 +100,7 @@ public interface FreedesktopStatusNotifierItemInterface : Object {
     public abstract IconPixmapStruct[] AttentionIconPixmap { owned get; }
     public abstract IconPixmapStruct[] OverlayIconPixmap { owned get; }
 
-    public abstract string ToolTip { owned get; }
+    public abstract ToolTipStruct ToolTip { owned get; }
     public abstract ObjectPath Menu { owned get; }
     public abstract bool ItemIsMenu { get; }
 
