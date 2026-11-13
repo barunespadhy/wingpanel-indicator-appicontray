@@ -122,8 +122,22 @@ public class TrayIcon : Gtk.EventBox {
                 DBusProxyFlags.NONE
             );
             if (item_proxy == null) return false;
-            try { var test_id = item_proxy.Id; }
-            catch (Error e) { item_proxy = null; return false; }
+            try {
+                var test_id = item_proxy.Id;
+                message(
+                    "AppIconTray: KDE proxy service='%s' id='%s'",
+                    service_name,
+                    test_id ?? "(null)"
+                );
+            } catch (Error e) {
+                warning(
+                    "AppIconTray: KDE proxy rejected service='%s': %s",
+                    service_name,
+                    e.message
+                );
+                item_proxy = null;
+                return false;
+            }
 
             // On icon change, recreate proxies then update the icon
             item_proxy.NewIcon.connect(() => {
@@ -140,6 +154,7 @@ public class TrayIcon : Gtk.EventBox {
                 });
             });
             item_proxy.NewTitle.connect(() => update_tooltip());
+            item_proxy.NewToolTip.connect(() => update_tooltip());
 
             use_freedesktop_interface = false;
             return true;
@@ -159,8 +174,22 @@ public class TrayIcon : Gtk.EventBox {
                 DBusProxyFlags.NONE
             );
             if (freedesktop_proxy == null) return false;
-            try { var test_id = freedesktop_proxy.Id; }
-            catch (Error e) { freedesktop_proxy = null; return false; }
+            try {
+                var test_id = freedesktop_proxy.Id;
+                message(
+                    "AppIconTray: freedesktop proxy service='%s' id='%s'",
+                    service_name,
+                    test_id ?? "(null)"
+                );
+            } catch (Error e) {
+                warning(
+                    "AppIconTray: freedesktop proxy rejected service='%s': %s",
+                    service_name,
+                    e.message
+                );
+                freedesktop_proxy = null;
+                return false;
+            }
 
             freedesktop_proxy.NewIcon.connect(() => {
                 recreate_proxy.begin((obj, res) => {
@@ -176,6 +205,7 @@ public class TrayIcon : Gtk.EventBox {
                 });
             });
             freedesktop_proxy.NewTitle.connect(() => update_tooltip());
+            freedesktop_proxy.NewToolTip.connect(() => update_tooltip());
 
             use_freedesktop_interface = true;
             return true;
@@ -186,24 +216,132 @@ public class TrayIcon : Gtk.EventBox {
         }
     }
 
-    private string? get_icon_name() {
-        try {
-            if (use_freedesktop_interface && freedesktop_proxy != null)
-                return freedesktop_proxy.IconName;
-            else if (item_proxy != null)
-                return item_proxy.IconName;
+    /*
+     * Some Electron/Chromium StatusNotifierItems expose valid properties
+     * through org.freedesktop.DBus.Properties.Get, while GDBus' typed
+     * proxy property cache may return null.
+     *
+     * Keep the typed proxy for signals/methods and use this only as a
+     * fallback for properties.
+     */
+    private string? get_string_property_direct(
+        string interface_name,
+        string property_name
+    ) {
+        if (connection == null) {
             return null;
-        } catch (Error e) { return null; }
+        }
+
+        try {
+            var reply = connection.call_sync(
+                bus_name,
+                object_path,
+                "org.freedesktop.DBus.Properties",
+                "Get",
+                new Variant(
+                    "(ss)",
+                    interface_name,
+                    property_name
+                ),
+                new VariantType("(v)"),
+                DBusCallFlags.NONE,
+                1000,
+                null
+            );
+
+            // Get returns a tuple containing a variant: (v)
+            Variant boxed = reply.get_child_value(0);
+            Variant value = boxed.get_variant();
+
+            string result = value.get_string();
+
+            message(
+                "AppIconTray: direct property service='%s' interface='%s' property='%s' value='%s'",
+                service_name,
+                interface_name,
+                property_name,
+                result
+            );
+
+            return result;
+
+        } catch (Error e) {
+            warning(
+                "AppIconTray: direct property failed service='%s' interface='%s' property='%s': %s",
+                service_name,
+                interface_name,
+                property_name,
+                e.message
+            );
+
+            return null;
+        }
+    }
+
+    private string current_item_interface() {
+        return use_freedesktop_interface
+            ? "org.freedesktop.StatusNotifierItem"
+            : "org.kde.StatusNotifierItem";
+    }
+
+    private string? get_icon_name() {
+        string? value = null;
+
+        try {
+            if (use_freedesktop_interface && freedesktop_proxy != null) {
+                value = freedesktop_proxy.IconName;
+            } else if (item_proxy != null) {
+                value = item_proxy.IconName;
+            }
+        } catch (Error e) {
+            warning(
+                "AppIconTray: typed IconName failed service='%s': %s",
+                service_name,
+                e.message
+            );
+        }
+
+        if (value != null && value != "") {
+            return value;
+        }
+
+        // Electron/Chromium fallback
+        value = get_string_property_direct(
+            current_item_interface(),
+            "IconName"
+        );
+
+        return value;
     }
 
     private string? get_icon_theme_path() {
+        string? value = null;
+
         try {
-            if (use_freedesktop_interface && freedesktop_proxy != null)
-                return freedesktop_proxy.IconThemePath;
-            else if (item_proxy != null)
-                return item_proxy.IconThemePath;
-            return null;
-        } catch (Error e) { return null; }
+            if (use_freedesktop_interface && freedesktop_proxy != null) {
+                value = freedesktop_proxy.IconThemePath;
+            } else if (item_proxy != null) {
+                value = item_proxy.IconThemePath;
+            }
+        } catch (Error e) {
+            warning(
+                "AppIconTray: typed IconThemePath failed service='%s': %s",
+                service_name,
+                e.message
+            );
+        }
+
+        if (value != null && value != "") {
+            return value;
+        }
+
+        // Electron/Chromium fallback
+        value = get_string_property_direct(
+            current_item_interface(),
+            "IconThemePath"
+        );
+
+        return value;
     }
 
     private IconPixmapStruct[]? get_icon_pixmap() {
@@ -247,13 +385,30 @@ public class TrayIcon : Gtk.EventBox {
     }
 
     private string? get_status() {
+        string? value = null;
+
         try {
-            if (use_freedesktop_interface && freedesktop_proxy != null)
-                return freedesktop_proxy.Status;
-            else if (item_proxy != null)
-                return item_proxy.Status;
-            return null;
-        } catch (Error e) { return null; }
+            if (use_freedesktop_interface && freedesktop_proxy != null) {
+                value = freedesktop_proxy.Status;
+            } else if (item_proxy != null) {
+                value = item_proxy.Status;
+            }
+        } catch (Error e) {
+            warning(
+                "AppIconTray: typed Status failed service='%s': %s",
+                service_name,
+                e.message
+            );
+        }
+
+        if (value != null && value != "") {
+            return value;
+        }
+
+        return get_string_property_direct(
+            current_item_interface(),
+            "Status"
+        );
     }
 
     private ObjectPath? get_menu_path() {
@@ -279,6 +434,14 @@ public class TrayIcon : Gtk.EventBox {
 
         if (icon_name != null && icon_name != "") {
             var icon_theme_path = get_icon_theme_path();
+
+            message(
+                "AppIconTray: service='%s' icon='%s' theme_path='%s' status='%s'",
+                service_name,
+                icon_name,
+                icon_theme_path ?? "(null)",
+                status ?? "(null)"
+            );
             if (icon_theme_path != null && icon_theme_path != "") {
                 if (load_icon_from_path(icon_theme_path, icon_name)) return;
                 var icon_theme = Gtk.IconTheme.get_default();
@@ -300,7 +463,17 @@ public class TrayIcon : Gtk.EventBox {
         }
         IconPixmapStruct[]? pixmaps = needs_attention ? get_attention_icon_pixmap() : get_icon_pixmap();
         if (pixmaps != null && pixmaps.length > 0 && load_icon_from_pixmap(pixmaps)) return;
-        icon_image.set_from_icon_name("application-x-executable", Gtk.IconSize.SMALL_TOOLBAR);
+        warning(
+            "AppIconTray: FALLBACK service='%s' icon='%s' theme_path='%s'",
+            service_name,
+            icon_name ?? "(null)",
+            get_icon_theme_path() ?? "(null)"
+        );
+
+        icon_image.set_from_icon_name(
+            "application-x-executable",
+            Gtk.IconSize.SMALL_TOOLBAR
+        );
         icon_image.pixel_size = 16;
     }
 
@@ -312,10 +485,26 @@ public class TrayIcon : Gtk.EventBox {
                 string icon_file = Path.build_filename(base_path + size_dir, icon_name + ext);
                 if (FileUtils.test(icon_file, FileTest.EXISTS)) {
                     try {
-                        var pixbuf = new Gdk.Pixbuf.from_file_at_scale(icon_file, 16, 16, true);
+                        message("AppIconTray: loading file '%s'", icon_file);
+
+                        var pixbuf = new Gdk.Pixbuf.from_file_at_scale(
+                            icon_file,
+                            16,
+                            16,
+                            true
+                        );
+
                         icon_image.set_from_pixbuf(pixbuf);
+
+                        message("AppIconTray: loaded file '%s' successfully", icon_file);
                         return true;
-                    } catch (Error e) {}
+                    } catch (Error e) {
+                        warning(
+                            "AppIconTray: failed loading file '%s': %s",
+                            icon_file,
+                            e.message
+                        );
+                    }
                 }
             }
         }
